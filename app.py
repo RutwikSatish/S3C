@@ -19,7 +19,8 @@ import numpy as np
 import plotly.graph_objects as go
 import json as _json
 import re
-import requests
+import urllib.request
+import urllib.error
 
 # ── PAGE CONFIG ──────────────────────────────────────────────
 st.set_page_config(
@@ -359,14 +360,12 @@ def groq_insight(api_key, system, user):
         return ("Add your Groq API key in the sidebar to unlock AI insights.\n\n"
                 "Get a free key at console.groq.com -- takes 30 seconds.")
     try:
-        # Sanitize BOTH input strings before they touch the HTTP stack.
-        # This is the definitive fix for the latin-1 / ascii codec errors:
-        # any non-ASCII character in the prompt (arrows, bullets, etc.)
-        # causes Python's http.client to blow up during body encoding.
+        # Sanitize inputs first — remove every non-ASCII character
         clean_sys  = _sanitize(system)
         clean_user = _sanitize(user)
 
-        payload = _json.dumps({
+        # Build payload — ensure_ascii=True escapes anything _sanitize missed
+        payload_bytes = _json.dumps({
             "model": GROQ_MODEL,
             "messages": [
                 {"role": "system", "content": clean_sys},
@@ -374,24 +373,29 @@ def groq_insight(api_key, system, user):
             ],
             "max_tokens": 900,
             "temperature": 0.3,
-        }, ensure_ascii=True)  # belt-and-suspenders: escape any remaining non-ASCII
+        }, ensure_ascii=True).encode("ascii")  # pure ASCII bytes, no codec issues
 
-        resp = requests.post(
+        # urllib.request gives full byte-level control — no latin-1 surprises
+        # from requests/http.client internals (affects Python 3.14+)
+        req = urllib.request.Request(
             "https://api.groq.com/openai/v1/chat/completions",
+            data=payload_bytes,
             headers={
                 "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json; charset=utf-8",
+                "Content-Type": "application/json",
             },
-            data=payload.encode("utf-8"),  # send bytes directly, skip requests' encoder
-            timeout=30,
+            method="POST",
         )
-        resp.raise_for_status()
-        raw = resp.json()["choices"][0]["message"]["content"].strip()
-        return _sanitize(raw)  # sanitize the response too
-    except requests.exceptions.HTTPError as e:
-        return f"Groq API error {e.response.status_code}: {e.response.text[:200]}"
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = _json.loads(resp.read().decode("utf-8"))
+        raw = result["choices"][0]["message"]["content"].strip()
+        return _sanitize(raw)
+
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:200]
+        return f"Groq API error {e.code}: {body}"
     except Exception as e:
-        return f"Error: {e}"
+        return f"Error: {_sanitize(str(e))}"
 
 def render_ai_box(text):
     lines = text.split("\n")
