@@ -3,4 +3,5 @@ pandas
 numpy
 plotly
 groq
+requests
 openpyxl
