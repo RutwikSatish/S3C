@@ -49,9 +49,11 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 [data-testid="stSidebar"] hr { border-color:#1e3a5f !important; }
 section[data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
-    background:linear-gradient(135deg,#1e3a5f,#0f2744) !important;
-    border:1px solid #3b82f6 !important; color:#93c5fd !important;
-    font-size:12px !important; border-radius:8px !important; width:100% !important;
+    background:linear-gradient(135deg,#2563eb,#1d4ed8) !important;
+    border:1px solid #60a5fa !important; color:#ffffff !important;
+    font-size:12px !important; font-weight:700 !important;
+    border-radius:8px !important; width:100% !important;
+    box-shadow:0 2px 10px rgba(37,99,235,.4) !important;
 }
 h1,h2,h3,h4,h5,p,span,label,div { color:#e2e8f0; }
 [data-testid="metric-container"] {
@@ -253,7 +255,12 @@ _NON_ASCII = {
     '\u00f7': '/',   '\u03b1': 'a',  '\u03b2': 'b',  '\u03bb': 'l',
 }
 
-def _sanitize(text: str) -> str:
+def _safe_json(obj) -> str:
+    """Serialize any object to a JSON string with all non-ASCII escaped.
+    Use this instead of str(df.to_dict(...)) in prompts — prevents the
+    latin-1 codec crash that occurs when DataFrame values contain
+    non-ASCII characters that get repr'd into the prompt string."""
+    return _json.dumps(obj, ensure_ascii=True, default=str)
     """Strip all non-ASCII from any string — used on BOTH prompts and responses."""
     for ch, rep in _NON_ASCII.items():
         text = text.replace(ch, rep)
@@ -675,7 +682,7 @@ def module_inventory_ui(api_key):
                         "working_capital","locked_capital"]].to_dict("records")
             render_ai_box(groq_insight(api_key,
                 "You are a senior inventory optimization analyst. Be specific with numbers. Bold key findings with **text**.",
-                f"Inventory portfolio: {rows}\n"
+                f"Inventory portfolio: {_safe_json(rows)}\n"
                 f"Total working capital: ${total_wc:,.0f}\n"
                 f"Locked in overstock: ${total_locked:,.0f}\n\n"
                 f"Provide:\n"
@@ -823,8 +830,8 @@ def module_supplier_ui(api_key):
                 "supplier_name"].tolist() if "single_source" in df.columns else []
             render_ai_box(groq_insight(api_key,
                 "You are a procurement and supplier risk expert. Be specific with numbers. Bold key findings with **text**.",
-                f"Supplier portfolio: {rows}\n"
-                f"Single-source suppliers: {ss_names or 'Not flagged'}\n"
+                f"Supplier portfolio: {_safe_json(rows)}\n"
+                f"Single-source suppliers: {_safe_json(ss_names)}\n"
                 f"Total spend: ${total_spend:,.0f}\n"
                 f"At-risk spend: ${at_risk_spend:,.0f}\n\n"
                 f"Provide:\n"
@@ -932,8 +939,8 @@ def module_sop_ui(api_key):
         with st.spinner("Analyzing with Groq..."):
             render_ai_box(groq_insight(api_key,
                 "You are a senior S&OP and supply chain planning expert. Be precise with numbers. Bold key findings with **text**.",
-                f"S&OP department signals (units): {df.to_dict('records')}\n"
-                f"Gap analysis: {gap_df.to_dict('records')}\n"
+                f"S&OP department signals (units): {_safe_json(df.to_dict('records'))}\n"
+                f"Gap analysis: {_safe_json(gap_df.to_dict('records'))}\n"
                 f"ASP = $45/unit | Average gap: {avg_gap:.1f}%\n\n"
                 f"Provide:\n"
                 f"1. Most dangerous quarter with specific dept shortfall/surplus\n"
@@ -1054,8 +1061,8 @@ def module_kpi_ui(api_key):
             off  = df[df["performance_pct"]<100]["kpi_name"].tolist()
             render_ai_box(groq_insight(api_key,
                 "You are a supply chain VP preparing an executive briefing. Be direct, specific, data-driven. Bold key findings with **text**.",
-                f"KPI performance: {rows}\n"
-                f"Off-target ({len(off)} of {len(df)}): {off}\n"
+                f"KPI performance: {_safe_json(rows)}\n"
+                f"Off-target ({len(off)} of {len(df)}): {_safe_json(off)}\n"
                 f"Monthly revenue base: $10M\n\n"
                 f"Provide:\n"
                 f"1. Top 3 KPIs bleeding most value with $ impact per unit of gap\n"
