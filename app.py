@@ -16,8 +16,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-import io, re
-from groq import Groq
+import io, re, requests
 
 # ── PAGE CONFIG ──────────────────────────────────────────────
 st.set_page_config(
@@ -353,20 +352,48 @@ def read_upload(file):
         st.error(f"Could not read file: {e}")
     return None
 
+_NON_ASCII = {
+    '\u00b7': '-',  '\u2022': '-',  '\u2013': '-',  '\u2014': '--',
+    '\u2018': "'",  '\u2019': "'",  '\u201c': '"',  '\u201d': '"',
+    '\u2026': '...', '\u00a0': ' ', '\u00b1': '+-',
+}
+
+def _sanitize(text: str) -> str:
+    """Replace common non-ASCII chars then drop anything remaining outside ASCII."""
+    for ch, rep in _NON_ASCII.items():
+        text = text.replace(ch, rep)
+    return text.encode('ascii', errors='replace').decode('ascii')
+
 def groq_insight(api_key, system, user):
     if not api_key:
         return "Add your Groq API key in the sidebar to unlock AI insights.\n\nGet a free key at console.groq.com — takes 30 seconds."
     try:
-        client = Groq(api_key=api_key)
-        resp = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role":"system","content":system},
-                      {"role":"user","content":user}],
-            max_tokens=900, temperature=0.3,
+        # Use requests directly — the groq Python client can raise ASCII
+        # codec errors internally when the model returns Unicode punctuation.
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user},
+                ],
+                "max_tokens": 900,
+                "temperature": 0.3,
+            },
+            timeout=30,
         )
-        return resp.choices[0].message.content.strip()
+        resp.raise_for_status()
+        text = resp.json()["choices"][0]["message"]["content"].strip()
+        return _sanitize(text)          # sanitize at the source
+    except requests.exceptions.HTTPError as e:
+        return f"Groq API error {e.response.status_code}: {e.response.text[:200]}"
     except Exception as e:
-        return f"Groq error: {e}"
+        return f"Error calling Groq: {e}"
 
 def render_ai_box(text):
     # ── Fix: sanitize non-ASCII chars Groq emits (ascii codec crash) ──
@@ -893,8 +920,10 @@ def module_sop_ui(api_key):
                 color=gap_df["gap_pct"],
                 colorscale=[[0,"#064e3b"],[.4,"#f59e0b"],[.7,"#ef4444"],[1,"#dc2626"]],
                 showscale=True,
-                colorbar=dict(title="Gap %", tickfont=dict(color="#94a3b8"),
-                              titlefont=dict(color="#94a3b8")),
+                colorbar=dict(
+                    title=dict(text="Gap %", font=dict(color="#94a3b8")),
+                    tickfont=dict(color="#94a3b8"),
+                ),
                 line=dict(width=0),
             ),
             text=gap_df["gap_pct"].apply(lambda v: f"{v:.1f}%"),
