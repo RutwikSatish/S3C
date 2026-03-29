@@ -42,18 +42,81 @@ html, body, [data-testid="stAppViewContainer"] {
     background: linear-gradient(180deg,#0a1628 0%,#0d1f3c 100%) !important;
     border-right: 1px solid #1e3a5f !important;
 }
-[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
+[data-testid="stSidebar"] * { color: #e2e8f0 !important; }
 [data-testid="stSidebar"] .stTextInput input {
-    background:#0f2744 !important; border:1px solid #1e4976 !important;
-    color:#e2e8f0 !important; border-radius:8px !important;
+    background:#0f2744 !important; border:1px solid #3b82f6 !important;
+    color:#ffffff !important; border-radius:8px !important;
 }
 [data-testid="stSidebar"] hr { border-color:#1e3a5f !important; }
-section[data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
-    background:linear-gradient(135deg,#2563eb,#1d4ed8) !important;
-    border:1px solid #60a5fa !important; color:#ffffff !important;
-    font-size:12px !important; font-weight:700 !important;
-    border-radius:8px !important; width:100% !important;
-    box-shadow:0 2px 10px rgba(37,99,235,.4) !important;
+
+/* Sidebar collapse/expand toggle arrow button */
+[data-testid="collapsedControl"],
+button[kind="header"],
+[data-testid="stSidebarCollapseButton"] button,
+[data-testid="stSidebarCollapsedControl"] button {
+    background: #1d4ed8 !important;
+    color: #ffffff !important;
+    border: 2px solid #60a5fa !important;
+    border-radius: 50% !important;
+    width: 2rem !important;
+    height: 2rem !important;
+    box-shadow: 0 0 12px rgba(59,130,246,0.6) !important;
+}
+[data-testid="collapsedControl"] svg,
+[data-testid="stSidebarCollapseButton"] svg,
+[data-testid="stSidebarCollapsedControl"] svg {
+    fill: #ffffff !important;
+    color: #ffffff !important;
+}
+
+/* Sidebar radio options */
+[data-testid="stSidebar"] .stRadio > div > label {
+    background: #0f2744 !important;
+    border: 1px solid #3b82f6 !important;
+    color: #93c5fd !important;
+    border-radius: 8px !important;
+    padding: 6px 12px !important;
+    font-size: 12px !important;
+    display: block !important;
+    margin-bottom: 4px !important;
+}
+[data-testid="stSidebar"] .stRadio > div > label:has(input:checked) {
+    background: linear-gradient(135deg,#1d4ed8,#2563eb) !important;
+    border-color: #60a5fa !important;
+    color: #ffffff !important;
+}
+[data-testid="stSidebar"] .stRadio label p { color: #e2e8f0 !important; }
+
+/* Download button — bright and visible */
+section[data-testid="stSidebar"] [data-testid="stDownloadButton"] button,
+section[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover {
+    background: linear-gradient(135deg,#1d4ed8,#2563eb) !important;
+    border: 1px solid #60a5fa !important;
+    color: #ffffff !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    border-radius: 8px !important;
+    width: 100% !important;
+    box-shadow: 0 2px 12px rgba(37,99,235,.5) !important;
+}
+
+/* File uploader text */
+[data-testid="stSidebar"] [data-testid="stFileUploader"] label,
+[data-testid="stSidebar"] [data-testid="stFileUploader"] p,
+[data-testid="stSidebar"] [data-testid="stFileUploader"] span {
+    color: #93c5fd !important;
+}
+
+/* Caption text */
+[data-testid="stSidebar"] .stCaption,
+[data-testid="stSidebar"] small {
+    color: #64a0d4 !important;
+}
+
+/* Markdown text in sidebar */
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+    color: #e2e8f0 !important;
+    font-size: 13px !important;
 }
 h1,h2,h3,h4,h5,p,span,label,div { color:#e2e8f0; }
 [data-testid="metric-container"] {
