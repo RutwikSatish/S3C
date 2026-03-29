@@ -89,8 +89,67 @@ st.markdown("""
 html, body, [data-testid="stAppViewContainer"] {
     background:#050d1a !important; color:#e2e8f0 !important;
 }
-[data-testid="stHeader"]  { background:transparent !important; }
-[data-testid="stToolbar"] { display:none; }
+/* ── Top header bar ── */
+[data-testid="stHeader"] {
+    background: #0a1628 !important;
+    border-bottom: 1px solid #1e3a5f !important;
+}
+
+/* ── Toolbar (top right menu: settings, share etc) ── */
+[data-testid="stToolbar"] {
+    display: flex !important;
+    visibility: visible !important;
+}
+[data-testid="stToolbar"] button,
+[data-testid="stToolbar"] svg {
+    color: #e2e8f0 !important;
+    fill: #e2e8f0 !important;
+}
+
+/* ── Deploy / hamburger menu button ── */
+#MainMenu { visibility: visible !important; display: block !important; }
+#MainMenu button { color: #e2e8f0 !important; }
+#MainMenu svg    { fill: #e2e8f0 !important; }
+
+/* ── Hamburger / kebab menu items ── */
+[data-testid="stMainMenuPopover"],
+[data-testid="stMainMenuPopover"] * {
+    background: #0f2744 !important;
+    color: #e2e8f0 !important;
+}
+
+/* ── Footer ── */
+footer { visibility: hidden; }
+
+/* ── Streamlit "Manage app" button (bottom right) ── */
+[data-testid="manage-app-button"] {
+    background: #1d4ed8 !important;
+    color: #fff !important;
+    border: 1px solid #60a5fa !important;
+    border-radius: 8px !important;
+}
+
+/* ── Sidebar toggle arrow — VERY visible ── */
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"] > button,
+[data-testid="stSidebarCollapsedControl"] > button,
+button[data-testid="baseButton-headerNoPadding"] {
+    background: #1d4ed8 !important;
+    border: 2px solid #60a5fa !important;
+    border-radius: 50% !important;
+    color: #fff !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    box-shadow: 0 0 16px rgba(59,130,246,.8) !important;
+}
+[data-testid="collapsedControl"] svg,
+[data-testid="stSidebarCollapseButton"] svg,
+[data-testid="stSidebarCollapsedControl"] svg,
+button[data-testid="baseButton-headerNoPadding"] svg {
+    fill: #ffffff !important;
+    color: #ffffff !important;
+    opacity: 1 !important;
+}
 
 /* ── Sidebar shell ── */
 [data-testid="stSidebar"] {
