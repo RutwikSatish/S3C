@@ -11,7 +11,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import json, re, urllib.request, urllib.error
+import json, re, http.client, ssl
 
 st.set_page_config(
     page_title="Supply Chain Command Center",
@@ -56,7 +56,9 @@ def groq_insight(api_key: str, system: str, user: str) -> str:
         return ("Enter your Groq API key in the sidebar.\n"
                 "Free key at console.groq.com -- 30 seconds to set up.")
     try:
-        payload = json.dumps({
+        # Serialize payload to bytes — ensure_ascii=True means only
+        # printable ASCII chars exist in the JSON string before encoding
+        body = json.dumps({
             "model": GROQ_MODEL,
             "messages": [
                 {"role": "system", "content": _clean(system)},
@@ -64,20 +66,33 @@ def groq_insight(api_key: str, system: str, user: str) -> str:
             ],
             "max_tokens": 900,
             "temperature": 0.3,
-        }, ensure_ascii=True).encode("latin-1", errors="ignore")
+        }, ensure_ascii=True).encode("ascii")
 
-        req = urllib.request.Request(
-            "https://api.groq.com/openai/v1/chat/completions",
-            data=payload,
-            headers={"Authorization": f"Bearer {api_key}",
-                     "Content-Type": "application/json"},
-            method="POST",
+        # Use http.client directly — gives full byte-level control
+        # over headers and body, bypassing urllib's internal latin-1
+        # header encoding that causes the crash on Python 3.14
+        ctx = ssl.create_default_context()
+        conn = http.client.HTTPSConnection("api.groq.com", context=ctx)
+        conn.request(
+            "POST",
+            "/openai/v1/chat/completions",
+            body=body,
+            headers={
+                "Authorization": "Bearer " + api_key,
+                "Content-Type":  "application/json",
+                "Content-Length": str(len(body)),
+            },
         )
-        with urllib.request.urlopen(req, timeout=30) as r:
-            result = json.loads(r.read().decode("utf-8"))
+        resp = conn.getresponse()
+        raw  = resp.read().decode("utf-8", errors="replace")
+        conn.close()
+
+        if resp.status != 200:
+            return f"Groq API error {resp.status}: {raw[:200]}"
+
+        result = json.loads(raw)
         return _clean(result["choices"][0]["message"]["content"].strip())
-    except urllib.error.HTTPError as e:
-        return f"Groq API error {e.code}: {e.read().decode('utf-8',errors='replace')[:200]}"
+
     except Exception as e:
         return f"Error: {_clean(str(e))}"
 
