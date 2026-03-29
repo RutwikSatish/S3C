@@ -2,26 +2,29 @@
 #  SUPPLY CHAIN COMMAND CENTER  |  app.py
 #  Premium Dark UI · Streamlit + Groq (llama-3.3-70b-versatile)
 #
-#  Fixes applied:
-#   1. legend duplicate kwarg in update_layout → dark() helper
+#  All bugs fixed:
+#   1. legend duplicate kwarg -> dark() helper
 #   2. empty label warnings on text_input / radio
-#   3. use_container_width deprecated → width='stretch'
-#   4. ASCII codec error in render_ai_box (Groq non-ASCII chars)
-#   5. fillcolor f"{clr}30" invalid in Plotly 6 → hex_to_rgba()
-#   6. gauge axis gridcolor not valid in Plotly 6 → removed
+#   3. use_container_width deprecated -> width='stretch'
+#   4. ASCII codec on Groq response -> _sanitize() on output
+#   5. latin-1 codec on outgoing prompts -> _sanitize() on inputs
+#   6. fillcolor hex-alpha invalid Plotly 6 -> hex_to_rgba()
+#   7. gauge axis gridcolor invalid Plotly 6 -> removed
+#   8. colorbar titlefont invalid Plotly 6 -> title=dict(font=...)
 # ============================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
-import io, re, requests
+import json as _json
+import re
+import requests
 
 # ── PAGE CONFIG ──────────────────────────────────────────────
 st.set_page_config(
     page_title="Supply Chain Command Center",
-    page_icon="⛓",
+    page_icon="chain",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -101,8 +104,6 @@ h1,h2,h3,h4,h5,p,span,label,div { color:#e2e8f0; }
     color:#e2e8f0 !important; border-radius:8px !important;
 }
 .stCaption { color:#64748b !important; font-size:11px !important; }
-
-/* ── Hero banner ── */
 .hero-banner {
     background:linear-gradient(135deg,#020e24 0%,#0a1f40 50%,#071830 100%);
     border:1px solid #1e3a5f; border-radius:16px; padding:28px 32px;
@@ -125,8 +126,6 @@ h1,h2,h3,h4,h5,p,span,label,div { color:#e2e8f0; }
     background:rgba(59,130,246,.12); border:1px solid rgba(59,130,246,.3);
     border-radius:20px; padding:4px 14px; font-size:11px; color:#93c5fd; font-weight:600;
 }
-
-/* ── Module banner ── */
 .module-banner {
     border-radius:14px; padding:18px 24px; margin-bottom:22px;
     position:relative; overflow:hidden;
@@ -143,8 +142,6 @@ h1,h2,h3,h4,h5,p,span,label,div { color:#e2e8f0; }
     background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.15);
     border-radius:20px; padding:3px 12px; font-size:11px; color:rgba(255,255,255,.8);
 }
-
-/* ── AI insight box ── */
 .ai-box-wrap {
     background:linear-gradient(135deg,#07101f 0%,#0c1a30 60%,#091525 100%);
     border:1px solid #1e4070; border-radius:14px; padding:20px 24px; margin-top:18px;
@@ -170,9 +167,7 @@ h1,h2,h3,h4,h5,p,span,label,div { color:#e2e8f0; }
     color:#cbd5e1 !important; font-size:13.5px; line-height:1.85;
     white-space:pre-wrap; position:relative; z-index:1;
 }
-.ai-content strong, .ai-content b { color:#93c5fd !important; font-weight:700; }
-
-/* ── Section headers ── */
+.ai-content strong { color:#93c5fd !important; font-weight:700; }
 .section-header {
     display:flex; align-items:center; gap:10px;
     margin:22px 0 14px 0; padding-bottom:10px; border-bottom:1px solid #1e3a5f;
@@ -181,8 +176,6 @@ h1,h2,h3,h4,h5,p,span,label,div { color:#e2e8f0; }
     font-size:14px; font-weight:700; color:#93c5fd;
     text-transform:uppercase; letter-spacing:.5px;
 }
-
-/* ── Alert boxes ── */
 .alert-critical {
     background:linear-gradient(135deg,#1a0a0a,#2d0f0f); border:1px solid #7f1d1d;
     border-left:4px solid #ef4444; border-radius:10px; padding:12px 16px;
@@ -198,8 +191,6 @@ h1,h2,h3,h4,h5,p,span,label,div { color:#e2e8f0; }
     border-left:4px solid #f59e0b; border-radius:10px; padding:12px 16px;
     color:#fcd34d; font-size:12px; margin-bottom:12px;
 }
-
-/* ── Sidebar logo ── */
 .sidebar-logo { text-align:center; padding:16px 0 8px 0; }
 .sidebar-logo .logo-icon { font-size:40px; display:block; }
 .sidebar-logo h2 {
@@ -213,8 +204,6 @@ h1,h2,h3,h4,h5,p,span,label,div { color:#e2e8f0; }
 
 # ══════════════════════════════════════════════════════════════
 #  PLOTLY DARK THEME
-#  legend is NOT in _DARK_BASE — handled per-chart via dark()
-#  to avoid "multiple values for keyword argument 'legend'"
 # ══════════════════════════════════════════════════════════════
 _DARK_BASE = dict(
     paper_bgcolor="#0a1628",
@@ -227,15 +216,12 @@ _DARK_BASE = dict(
     yaxis=dict(gridcolor="#0f2240", linecolor="#1e3a5f",
                tickfont=dict(color="#64748b"), zerolinecolor="#1e3a5f"),
 )
-
 _LEGEND_DEFAULT = dict(
     bgcolor="rgba(10,22,40,0.8)", bordercolor="#1e3a5f", borderwidth=1,
     font=dict(color="#94a3b8", size=11), orientation="h", y=-0.22,
 )
 
 def dark(fig, height=380, legend=True, **extra):
-    """Apply dark theme. legend=True → default horiz legend,
-       legend=dict(...) → merged with default, legend=False → hidden."""
     layout = {**_DARK_BASE, "height": height, **extra}
     if legend is True:
         layout["legend"] = _LEGEND_DEFAULT
@@ -245,17 +231,33 @@ def dark(fig, height=380, legend=True, **extra):
     return fig
 
 def pc(fig):
-    """st.plotly_chart using width='stretch' (replaces deprecated use_container_width)."""
     st.plotly_chart(fig, width="stretch")
 
 def hex_to_rgba(hex_color, alpha=0.18):
-    """Convert #rrggbb to rgba(r,g,b,a). Safe for Plotly 6 color validator."""
     h = hex_color.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
     return f"rgba({r},{g},{b},{alpha})"
 
 PALETTE = ["#6366f1","#10b981","#f59e0b","#ec4899","#38bdf8",
            "#8b5cf6","#fb923c","#84cc16","#06b6d4","#f43f5e"]
+
+# ══════════════════════════════════════════════════════════════
+#  ENCODING HELPERS  (fix: sanitize both IN and OUT to Groq)
+# ══════════════════════════════════════════════════════════════
+_NON_ASCII = {
+    '\u00b7': '-',  '\u2022': '-',  '\u2013': '-',  '\u2014': '--',
+    '\u2018': "'",  '\u2019': "'",  '\u201c': '"',  '\u201d': '"',
+    '\u2026': '...', '\u00a0': ' ', '\u00b1': '+-', '\u2192': '->',
+    '\u2190': '<-',  '\u2713': 'ok', '\u2717': 'x',  '\u00d7': 'x',
+    '\u00f7': '/',   '\u03b1': 'a',  '\u03b2': 'b',  '\u03bb': 'l',
+}
+
+def _sanitize(text: str) -> str:
+    """Strip all non-ASCII from any string — used on BOTH prompts and responses."""
+    for ch, rep in _NON_ASCII.items():
+        text = text.replace(ch, rep)
+    # Final sweep: replace anything still outside ASCII range
+    return text.encode('ascii', errors='replace').decode('ascii')
 
 # ══════════════════════════════════════════════════════════════
 #  DEMO DATASETS
@@ -313,25 +315,25 @@ SCHEMAS = {
 MODULE_META = {
     "forecast":  {"icon":"📈","title":"Demand Forecast Engine",  "color":"#6366f1",
                   "grad":"linear-gradient(135deg,#312e81,#1e1b4b,#0f0d2e)",
-                  "problem":"Analysts manually tweak spreadsheets -> +/-30% forecast errors -> overstock or stockouts bleed cash every quarter."},
+                  "problem":"Analysts manually tweak spreadsheets - 30% forecast errors - overstock or stockouts bleed cash every quarter."},
     "inventory": {"icon":"📦","title":"Inventory Health Monitor","color":"#10b981",
                   "grad":"linear-gradient(135deg,#064e3b,#065f46,#022c22)",
-                  "problem":"No dynamic EOQ/safety-stock model -> working capital locked in dead stock OR stockouts tank fill rate."},
+                  "problem":"No dynamic EOQ/safety-stock model - working capital locked in dead stock OR stockouts tank fill rate."},
     "supplier":  {"icon":"🏭","title":"Supplier Risk Radar",     "color":"#f59e0b",
                   "grad":"linear-gradient(135deg,#78350f,#92400e,#451a03)",
-                  "problem":"Single-source concentration + zero early-warning scores -> one supplier failure cascades into a production shutdown."},
+                  "problem":"Single-source concentration + zero early-warning scores - one supplier failure cascades into a production shutdown."},
     "sop":       {"icon":"🔄","title":"S&OP Alignment Monitor",  "color":"#ec4899",
                   "grad":"linear-gradient(135deg,#831843,#9d174d,#4a0520)",
-                  "problem":"Sales, Demand Planning, Production & Procurement run different numbers -> wrong product, wrong time, wrong place."},
+                  "problem":"Sales, Demand Planning, Production & Procurement run different numbers - wrong product, wrong time, wrong place."},
     "kpi":       {"icon":"📊","title":"KPI Command Center",      "color":"#38bdf8",
                   "grad":"linear-gradient(135deg,#0c4a6e,#075985,#082f49)",
-                  "problem":"OTIF, fill rates, lead times tracked in 10 spreadsheets by 10 people -> leadership decides on stale conflicting data."},
+                  "problem":"OTIF, fill rates, lead times tracked in 10 spreadsheets by 10 people - leadership decides on stale conflicting data."},
 }
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # ══════════════════════════════════════════════════════════════
-#  HELPERS
+#  CORE HELPERS
 # ══════════════════════════════════════════════════════════════
 def get_df(key):
     return st.session_state.get(f"upload_{key}", DEMO[key]).copy()
@@ -352,74 +354,53 @@ def read_upload(file):
         st.error(f"Could not read file: {e}")
     return None
 
-_NON_ASCII = {
-    '\u00b7': '-',  '\u2022': '-',  '\u2013': '-',  '\u2014': '--',
-    '\u2018': "'",  '\u2019': "'",  '\u201c': '"',  '\u201d': '"',
-    '\u2026': '...', '\u00a0': ' ', '\u00b1': '+-',
-}
-
-def _sanitize(text: str) -> str:
-    """Replace common non-ASCII chars then drop anything remaining outside ASCII."""
-    for ch, rep in _NON_ASCII.items():
-        text = text.replace(ch, rep)
-    return text.encode('ascii', errors='replace').decode('ascii')
-
 def groq_insight(api_key, system, user):
     if not api_key:
-        return "Add your Groq API key in the sidebar to unlock AI insights.\n\nGet a free key at console.groq.com — takes 30 seconds."
+        return ("Add your Groq API key in the sidebar to unlock AI insights.\n\n"
+                "Get a free key at console.groq.com -- takes 30 seconds.")
     try:
-        # Use requests directly — the groq Python client can raise ASCII
-        # codec errors internally when the model returns Unicode punctuation.
+        # Sanitize BOTH input strings before they touch the HTTP stack.
+        # This is the definitive fix for the latin-1 / ascii codec errors:
+        # any non-ASCII character in the prompt (arrows, bullets, etc.)
+        # causes Python's http.client to blow up during body encoding.
+        clean_sys  = _sanitize(system)
+        clean_user = _sanitize(user)
+
+        payload = _json.dumps({
+            "model": GROQ_MODEL,
+            "messages": [
+                {"role": "system", "content": clean_sys},
+                {"role": "user",   "content": clean_user},
+            ],
+            "max_tokens": 900,
+            "temperature": 0.3,
+        }, ensure_ascii=True)  # belt-and-suspenders: escape any remaining non-ASCII
+
         resp = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
+                "Content-Type": "application/json; charset=utf-8",
             },
-            json={
-                "model": GROQ_MODEL,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user",   "content": user},
-                ],
-                "max_tokens": 900,
-                "temperature": 0.3,
-            },
+            data=payload.encode("utf-8"),  # send bytes directly, skip requests' encoder
             timeout=30,
         )
         resp.raise_for_status()
-        text = resp.json()["choices"][0]["message"]["content"].strip()
-        return _sanitize(text)          # sanitize at the source
+        raw = resp.json()["choices"][0]["message"]["content"].strip()
+        return _sanitize(raw)  # sanitize the response too
     except requests.exceptions.HTTPError as e:
         return f"Groq API error {e.response.status_code}: {e.response.text[:200]}"
     except Exception as e:
-        return f"Error calling Groq: {e}"
+        return f"Error: {e}"
 
 def render_ai_box(text):
-    # ── Fix: sanitize non-ASCII chars Groq emits (ascii codec crash) ──
-    _replacements = {
-        '\u00b7': '-',   # · middle dot
-        '\u2022': '-',   # • bullet
-        '\u2013': '-',   # - en dash
-        '\u2014': '--',  # -- em dash
-        '\u2018': "'",   # ' left single quote
-        '\u2019': "'",   # ' right single quote
-        '\u201c': '"',   # " left double quote
-        '\u201d': '"',   # " right double quote
-        '\u2026': '...', # ... ellipsis
-        '\u00a0': ' ',   # non-breaking space
-    }
-    for char, replacement in _replacements.items():
-        text = text.replace(char, replacement)
-    # Belt-and-suspenders: drop anything still outside ASCII
-    text = text.encode('ascii', errors='replace').decode('ascii')
-
     lines = text.split("\n")
     html_lines = []
     for line in lines:
         line = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)
-        if line.strip().startswith(("*", "-", "?")):
-            line = "&nbsp;&nbsp;" + line.strip()[1:].strip()
+        stripped = line.strip()
+        if stripped.startswith(("-", "*", "?")):
+            line = "&nbsp;&nbsp;" + stripped[1:].strip()
         html_lines.append(line)
     formatted = "<br>".join(html_lines)
     st.markdown(f"""
@@ -444,11 +425,8 @@ def module_banner(key):
 
 def sh(icon, label):
     st.markdown(
-        f'<div class="section-header">'
-        f'<span style="font-size:16px">{icon}</span>'
-        f'<span>{label}</span></div>',
-        unsafe_allow_html=True,
-    )
+        f'<div class="section-header"><span style="font-size:16px">{icon}</span>'
+        f'<span>{label}</span></div>', unsafe_allow_html=True)
 
 def alert(kind, msg):
     cls = {"critical":"alert-critical","info":"alert-info","warning":"alert-warning"}[kind]
@@ -456,7 +434,7 @@ def alert(kind, msg):
 
 def data_source_panel(module_key):
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**📂 Data Source**")
+    st.sidebar.markdown("**Data Source**")
     use_demo = st.sidebar.radio(
         "Data source choice",
         ["Use Demo Dataset", "Upload My Data"],
@@ -477,13 +455,11 @@ def data_source_panel(module_key):
             del st.session_state[f"upload_{module_key}"]
     else:
         st.session_state.pop(f"upload_{module_key}", None)
-
     st.sidebar.download_button(
         "Download CSV Template",
         data=to_csv_bytes(DEMO[module_key]),
         file_name=f"template_{module_key}.csv",
-        mime="text/csv",
-        key=f"dl_{module_key}",
+        mime="text/csv", key=f"dl_{module_key}",
     )
 
 # ══════════════════════════════════════════════════════════════
@@ -493,20 +469,18 @@ def module_forecast_ui(api_key):
     module_banner("forecast")
     df = get_df("forecast")
 
-    with st.expander(f"📋 Raw Dataset {'(Demo)' if is_demo('forecast') else '(Uploaded)'}", False):
+    with st.expander(f"Raw Dataset {'(Demo)' if is_demo('forecast') else '(Uploaded)'}", False):
         st.dataframe(df, width="stretch")
 
     actuals = df[df["actual_demand"].notna()]["actual_demand"].astype(float).tolist()
     months  = df["month"].tolist()
     n       = len(actuals)
 
-    # EMA smoothing
     alpha = 0.35
     ema = [actuals[0]]
     for v in actuals[1:]:
         ema.append(alpha * v + (1 - alpha) * ema[-1])
 
-    # Linear trend projection
     x = np.arange(n)
     slope, intercept = np.polyfit(x, actuals, 1) if n > 1 else (0, actuals[0])
     forecast_vals = [
@@ -515,23 +489,23 @@ def module_forecast_ui(api_key):
         for i in range(n, len(months))
     ]
 
-    mape = np.mean([abs(a - e) / a * 100 for a, e in zip(actuals[-3:], ema[-3:])]) if n >= 3 else 0
+    mape       = np.mean([abs(a-e)/a*100 for a,e in zip(actuals[-3:],ema[-3:])]) if n >= 3 else 0
     accuracy   = round(max(0, 100 - mape), 1)
     volatility = round(np.std(actuals) / np.mean(actuals) * 100, 1)
 
     promo_months = []
     if "promo_flag" in df.columns:
-        promo_months = [months[i] for i, v in enumerate(df["promo_flag"].tolist())
+        promo_months = [months[i] for i,v in enumerate(df["promo_flag"].tolist())
                         if v == 1 and i < n]
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1,c2,c3,c4 = st.columns(4)
     c1.metric("Avg Monthly Demand", f"{int(np.mean(actuals)):,} u")
     c2.metric("EMA Accuracy",       f"{accuracy}%", f"{accuracy-90:.1f}% vs 90% target")
     c3.metric("Demand Volatility",  f"+-{volatility}%", "High" if volatility > 15 else "Moderate")
     c4.metric("Projected Next Qtr",
               f"{int(np.mean(forecast_vals[:3])):,} u/mo" if forecast_vals else "N/A")
 
-    sh("📊", "Demand Timeline — Actuals · EMA · Forecast")
+    sh("📊", "Demand Timeline - Actuals, EMA, Forecast")
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=months[:n], y=actuals, name="Actual Demand",
@@ -568,9 +542,9 @@ def module_forecast_ui(api_key):
             line=dict(color="#6366f1", width=2), mode="lines",
         ))
         pc(dark(fig2, height=220, legend=False, title="Demand Area",
-                margin=dict(t=32, b=16, l=8, r=8)))
+                margin=dict(t=32,b=16,l=8,r=8)))
     with col_b:
-        mom = [round((actuals[i]-actuals[i-1])/actuals[i-1]*100, 1) if i > 0 else 0
+        mom = [round((actuals[i]-actuals[i-1])/actuals[i-1]*100,1) if i>0 else 0
                for i in range(n)]
         fig3 = go.Figure(go.Bar(
             x=months[:n], y=mom,
@@ -580,30 +554,30 @@ def module_forecast_ui(api_key):
         ))
         fig3.add_hline(y=0, line_color="#334155", line_width=1)
         pc(dark(fig3, height=220, legend=False, title="Month-on-Month Growth %",
-                margin=dict(t=32, b=16, l=8, r=8)))
+                margin=dict(t=32,b=16,l=8,r=8)))
 
     if promo_months:
-        alert("info", f"<b>Promo months detected:</b> {', '.join(promo_months)} — factored into projection")
+        alert("info", f"<b>Promo months detected:</b> {', '.join(promo_months)} - factored into projection")
 
     sh("🤖", "AI Demand Analysis")
     if st.button("Run AI Forecast Analysis", key="btn_forecast"):
-        with st.spinner("Analyzing demand patterns with Groq..."):
-            data_str = ", ".join([f"{m}: {v}" for m, v in zip(months[:n], actuals)])
-            proj_str  = ", ".join([f"{m}: {v}" for m, v in zip(months[n:], forecast_vals)])
+        with st.spinner("Analyzing with Groq..."):
+            data_str = ", ".join([f"{m}: {v}" for m,v in zip(months[:n], actuals)])
+            proj_str  = ", ".join([f"{m}: {v}" for m,v in zip(months[n:], forecast_vals)])
             render_ai_box(groq_insight(api_key,
                 "You are a senior supply chain demand planning analyst. Be specific with numbers. Bold key findings with **text**.",
-                f"""Historical demand: {data_str}
-EMA projection: {proj_str}
-Forecast accuracy: {accuracy}% (target 90%) | Demand volatility: +-{volatility}%
-Promo months: {promo_months or 'None'}
-
-Provide:
-1. Trend direction and monthly growth rate
-2. Seasonality patterns and peak risk months
-3. Root cause of forecast accuracy gap
-4. Top 3 immediate actions to improve accuracy
-5. Recommended safety stock buffer % for this volatility
-6. Stockout or overstock risk next quarter with estimated $ exposure"""
+                f"Historical demand: {data_str}\n"
+                f"EMA projection: {proj_str}\n"
+                f"Forecast accuracy: {accuracy}% (target 90%)\n"
+                f"Demand volatility: +-{volatility}%\n"
+                f"Promo months: {promo_months or 'None'}\n\n"
+                f"Provide:\n"
+                f"1. Trend direction and monthly growth rate\n"
+                f"2. Seasonality patterns and peak risk months\n"
+                f"3. Root cause of forecast accuracy gap\n"
+                f"4. Top 3 immediate actions to improve accuracy\n"
+                f"5. Recommended safety stock buffer % for this volatility\n"
+                f"6. Stockout or overstock risk next quarter with estimated $ exposure"
             ))
 
 # ══════════════════════════════════════════════════════════════
@@ -619,13 +593,13 @@ def module_inventory_ui(api_key):
     df["locked_capital"]  = (df["excess_units"] * df["unit_cost"]).round(2)
 
     def classify(r):
-        if r["stock"] < r["safety_stock"]:             return "Critical"
-        if r["days_of_supply"] < r["lead_time_days"]:  return "Stockout Risk"
+        if r["stock"] < r["safety_stock"]:              return "Critical"
+        if r["days_of_supply"] < r["lead_time_days"]:   return "Stockout Risk"
         if r["stock"] > 2 * r["eoq"] + r["safety_stock"]: return "Overstock"
         return "Healthy"
     df["status"] = df.apply(classify, axis=1)
 
-    with st.expander(f"📋 Raw Dataset {'(Demo)' if is_demo('inventory') else '(Uploaded)'}", False):
+    with st.expander(f"Raw Dataset {'(Demo)' if is_demo('inventory') else '(Uploaded)'}", False):
         st.dataframe(df, width="stretch")
 
     critical  = df[df["status"].isin(["Critical","Stockout Risk"])]
@@ -633,7 +607,7 @@ def module_inventory_ui(api_key):
     total_locked = overstock["locked_capital"].sum()
     total_wc     = df["working_capital"].sum()
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1,c2,c3,c4 = st.columns(4)
     c1.metric("SKUs at Risk",     len(critical),  f"{len(critical)} need action now")
     c2.metric("Overstock SKUs",   len(overstock))
     c3.metric("Capital Locked",   f"${total_locked:,.0f}", "excess above EOQ+SS")
@@ -643,7 +617,7 @@ def module_inventory_ui(api_key):
         alert("critical",
               "<b>Immediate Action Required:</b> " +
               " | ".join([f"<b>{r.sku}</b> ({r.item_name}): {r.days_of_supply}d supply, LT {r.lead_time_days}d"
-                          for _, r in critical.iterrows()]))
+                          for _,r in critical.iterrows()]))
 
     sh("📦", "Stock Levels vs Thresholds")
     names = df["item_name"].tolist()
@@ -665,19 +639,19 @@ def module_inventory_ui(api_key):
             textinfo="label+percent", textfont=dict(color="#e2e8f0", size=11),
         ))
         pc(dark(fig2, height=300, legend=False, title="Working Capital by SKU",
-                margin=dict(t=40, b=0, l=0, r=0)))
+                margin=dict(t=40,b=0,l=0,r=0)))
     with col_b:
         dos = df["days_of_supply"].tolist()
         fig3 = go.Figure(go.Bar(
             x=df["item_name"], y=dos,
-            marker_color=["#ef4444" if d < 5 else "#f59e0b" if d < 14 else "#10b981" for d in dos],
+            marker_color=["#ef4444" if d<5 else "#f59e0b" if d<14 else "#10b981" for d in dos],
             text=[f"{d}d" for d in dos], textposition="outside",
             textfont=dict(color="#e2e8f0"),
         ))
         fig3.add_hline(y=14, line_dash="dot", line_color="#f59e0b",
                        annotation_text="14d threshold", annotation_font_color="#f59e0b")
         pc(dark(fig3, height=300, legend=False, title="Days of Supply per SKU",
-                margin=dict(t=40, b=16, l=8, r=8)))
+                margin=dict(t=40,b=16,l=8,r=8)))
 
     sh("🌡", "Inventory Status Heatmap")
     heat_vals = df[["stock","reorder_point","safety_stock","eoq","days_of_supply"]].values.T
@@ -686,28 +660,27 @@ def module_inventory_ui(api_key):
         y=["Stock","Reorder Pt","Safety Stock","EOQ","Days Supply"],
         colorscale=[[0,"#0f172a"],[.3,"#1e3a5f"],[.6,"#6366f1"],[1,"#a5b4fc"]],
         texttemplate="%{z:,.0f}", textfont=dict(size=11, color="#e2e8f0"),
-        hovertemplate="<b>%{y}</b> - %{x}<br>Value: %{z:,.1f}<extra></extra>",
     ))
-    pc(dark(fig4, height=240, legend=False, margin=dict(t=20, b=20, l=100, r=16)))
+    pc(dark(fig4, height=240, legend=False, margin=dict(t=20,b=20,l=100,r=16)))
 
     sh("🤖", "AI Inventory Analysis")
     if st.button("Run AI Inventory Analysis", key="btn_inventory"):
-        with st.spinner("Analyzing inventory health with Groq..."):
+        with st.spinner("Analyzing with Groq..."):
             rows = df[["sku","item_name","stock","reorder_point","eoq","safety_stock",
                         "daily_demand","lead_time_days","days_of_supply","status",
                         "working_capital","locked_capital"]].to_dict("records")
             render_ai_box(groq_insight(api_key,
                 "You are a senior inventory optimization analyst. Be specific with numbers. Bold key findings with **text**.",
-                f"""Inventory portfolio: {rows}
-Total working capital: ${total_wc:,.0f} | Locked in overstock: ${total_locked:,.0f}
-
-Provide:
-1. Top 2 SKUs needing immediate PO or production stop
-2. Exact order quantity per critical/stockout-risk SKU
-3. Overstock reduction plan with timeline
-4. Working capital freed if right-sized to EOQ + Safety Stock
-5. Safety stock formula recommendation for these lead times
-6. One systemic fix to prevent recurrence"""
+                f"Inventory portfolio: {rows}\n"
+                f"Total working capital: ${total_wc:,.0f}\n"
+                f"Locked in overstock: ${total_locked:,.0f}\n\n"
+                f"Provide:\n"
+                f"1. Top 2 SKUs needing immediate PO or production stop\n"
+                f"2. Exact order quantity per critical/stockout-risk SKU\n"
+                f"3. Overstock reduction plan with timeline\n"
+                f"4. Working capital freed if right-sized to EOQ + Safety Stock\n"
+                f"5. Safety stock formula recommendation for these lead times\n"
+                f"6. One systemic fix to prevent recurrence"
             ))
 
 # ══════════════════════════════════════════════════════════════
@@ -723,20 +696,19 @@ def module_supplier_ui(api_key):
         df["cost_score"]   * 0.25
     ).round(1)
     df["risk_tier"]   = df["composite_score"].apply(
-        lambda s: "Low" if s >= 85 else ("Medium" if s >= 70 else ("High" if s >= 55 else "Critical")))
+        lambda s: "Low" if s>=85 else ("Medium" if s>=70 else ("High" if s>=55 else "Critical")))
     df["spend_share"] = (df["annual_spend"] / df["annual_spend"].sum() * 100).round(1)
 
     total_spend   = df["annual_spend"].sum()
     at_risk_spend = df[df["risk_tier"].isin(["High","Critical"])]["annual_spend"].sum()
-    ss_spend      = df[df["single_source"] == 1]["annual_spend"].sum() \
+    ss_spend      = df[df["single_source"]==1]["annual_spend"].sum() \
                     if "single_source" in df.columns else 0
+    risk_colors   = {"Low":"#10b981","Medium":"#f59e0b","High":"#ef4444","Critical":"#dc2626"}
 
-    risk_colors = {"Low":"#10b981","Medium":"#f59e0b","High":"#ef4444","Critical":"#dc2626"}
-
-    with st.expander(f"📋 Raw Dataset {'(Demo)' if is_demo('supplier') else '(Uploaded)'}", False):
+    with st.expander(f"Raw Dataset {'(Demo)' if is_demo('supplier') else '(Uploaded)'}", False):
         st.dataframe(df, width="stretch")
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1,c2,c3,c4 = st.columns(4)
     c1.metric("Total Supplier Spend", f"${total_spend:,.0f}")
     c2.metric("At-Risk Spend",        f"${at_risk_spend:,.0f}",
               f"{at_risk_spend/total_spend*100:.0f}% of portfolio")
@@ -748,7 +720,7 @@ def module_supplier_ui(api_key):
         alert("critical",
               "<b>High/Critical Risk Suppliers:</b> " +
               " | ".join([f"<b>{r.supplier_name}</b> score {r.composite_score} | ${r.annual_spend:,.0f}"
-                          for _, r in high_risk.iterrows()]))
+                          for _,r in high_risk.iterrows()]))
 
     sh("📊", "Supplier Scorecard")
     fig = go.Figure()
@@ -772,12 +744,12 @@ def module_supplier_ui(api_key):
     col_a, col_b = st.columns([3, 2])
     with col_a:
         fig2 = go.Figure()
-        for _, row in df.iterrows():
+        for _,row in df.iterrows():
             clr = risk_colors.get(row["risk_tier"], "#64748b")
             fig2.add_trace(go.Scatter(
                 x=[row["composite_score"]], y=[row["annual_spend"]],
                 mode="markers+text",
-                marker=dict(size=row["lead_time_days"] * 3.5, color=clr, opacity=.75,
+                marker=dict(size=row["lead_time_days"]*3.5, color=clr, opacity=.75,
                             line=dict(color=clr, width=2)),
                 text=[row["supplier_name"]], textposition="top center",
                 textfont=dict(color="#e2e8f0", size=11),
@@ -797,9 +769,10 @@ def module_supplier_ui(api_key):
                         line=dict(color="#0a1628", width=2)),
             textinfo="percent", textfont=dict(color="#e2e8f0", size=10),
         ))
-        pc(dark(fig3, height=340, title="Spend by Supplier", margin=dict(t=40, b=0, l=0, r=0)))
+        pc(dark(fig3, height=340, title="Spend by Supplier",
+                margin=dict(t=40,b=0,l=0,r=0)))
 
-    sh("📡", "Supplier Deep Dive — Radar")
+    sh("📡", "Supplier Deep Dive - Radar")
     sel = st.selectbox("Select supplier to inspect", df["supplier_name"].tolist(), key="sup_radar")
     row = df[df["supplier_name"] == sel].iloc[0]
     cats = ["Delivery %","Quality %","Cost Score","Lead Time Inv.","Composite"]
@@ -809,55 +782,54 @@ def module_supplier_ui(api_key):
         row["composite_score"],
     ]
     clr = risk_colors.get(row["risk_tier"], "#6366f1")
-
     fig4 = go.Figure()
     fig4.add_trace(go.Scatterpolar(
         r=vals + [vals[0]], theta=cats + [cats[0]],
         fill="toself",
-        fillcolor=hex_to_rgba(clr),          # fix: rgba() not hex-alpha
+        fillcolor=hex_to_rgba(clr),   # fix: rgba() not 8-digit hex
         line=dict(color=clr, width=2.5),
         marker=dict(size=7, color=clr),
         name=sel,
     ))
     fig4.add_trace(go.Scatterpolar(
-        r=[85] * len(cats) + [85], theta=cats + [cats[0]],
+        r=[85]*len(cats)+[85], theta=cats+[cats[0]],
         line=dict(color="#334155", dash="dot", width=1),
         fill=None, name="Healthy Threshold",
     ))
     fig4.update_layout(
         polar=dict(
             bgcolor="#0a1628",
-            radialaxis=dict(visible=True, range=[0, 100], gridcolor="#1e3a5f",
+            radialaxis=dict(visible=True, range=[0,100], gridcolor="#1e3a5f",
                             tickfont=dict(color="#64748b", size=9)),
             angularaxis=dict(gridcolor="#1e3a5f", tickfont=dict(color="#94a3b8", size=11)),
         ),
         paper_bgcolor="#0a1628", height=320,
         legend=dict(bgcolor="#0a1628", bordercolor="#1e3a5f", font=dict(color="#94a3b8")),
-        margin=dict(t=20, b=20, l=40, r=40),
+        margin=dict(t=20,b=20,l=40,r=40),
     )
     pc(fig4)
 
     sh("🤖", "AI Supplier Risk Assessment")
     if st.button("Run AI Supplier Analysis", key="btn_supplier"):
-        with st.spinner("Assessing supplier portfolio with Groq..."):
+        with st.spinner("Analyzing with Groq..."):
             rows = df[["supplier_name","delivery_pct","quality_pct","cost_score",
                         "lead_time_days","annual_spend","composite_score",
                         "risk_tier","spend_share"]].to_dict("records")
-            ss_names = df[df.get("single_source", pd.Series(0, index=df.index)) == 1][
+            ss_names = df[df.get("single_source", pd.Series(0,index=df.index))==1][
                 "supplier_name"].tolist() if "single_source" in df.columns else []
             render_ai_box(groq_insight(api_key,
                 "You are a procurement and supplier risk expert. Be specific with numbers. Bold key findings with **text**.",
-                f"""Supplier portfolio: {rows}
-Single-source suppliers (concentration risk): {ss_names or 'Not flagged'}
-Total spend: ${total_spend:,.0f} | At-risk spend: ${at_risk_spend:,.0f}
-
-Provide:
-1. Top 2 risks with exact $ exposure if supplier fails
-2. Which supplier needs a 30-day PIP with specific KPI targets
-3. Dual-sourcing priorities
-4. Negotiation leverage — who we overpay given their risk score
-5. 30-day quick win to reduce portfolio risk
-6. One weekly early-warning metric to track"""
+                f"Supplier portfolio: {rows}\n"
+                f"Single-source suppliers: {ss_names or 'Not flagged'}\n"
+                f"Total spend: ${total_spend:,.0f}\n"
+                f"At-risk spend: ${at_risk_spend:,.0f}\n\n"
+                f"Provide:\n"
+                f"1. Top 2 risks with exact $ exposure if supplier fails\n"
+                f"2. Which supplier needs a 30-day PIP with specific KPI targets\n"
+                f"3. Dual-sourcing priorities\n"
+                f"4. Negotiation leverage - who we overpay given their risk score\n"
+                f"5. 30-day quick win to reduce portfolio risk\n"
+                f"6. One weekly early-warning metric to track"
             ))
 
 # ══════════════════════════════════════════════════════════════
@@ -869,7 +841,7 @@ def module_sop_ui(api_key):
     quarters = ["q1","q2","q3","q4"]
     ql = {"q1":"Q1","q2":"Q2","q3":"Q3","q4":"Q4"}
 
-    with st.expander(f"📋 Raw Dataset {'(Demo)' if is_demo('sop') else '(Uploaded)'}", False):
+    with st.expander(f"Raw Dataset {'(Demo)' if is_demo('sop') else '(Uploaded)'}", False):
         st.dataframe(df, width="stretch")
 
     gap_data = []
@@ -877,37 +849,39 @@ def module_sop_ui(api_key):
         vals = df[q].astype(float).tolist()
         gap_data.append({
             "quarter": ql[q], "max": max(vals), "min": min(vals),
-            "gap": max(vals) - min(vals),
-            "gap_pct": (max(vals) - min(vals)) / max(vals) * 100,
+            "gap": max(vals)-min(vals),
+            "gap_pct": (max(vals)-min(vals))/max(vals)*100,
         })
     gap_df  = pd.DataFrame(gap_data)
     worst_q = gap_df.loc[gap_df["gap_pct"].idxmax()]
     avg_gap = gap_df["gap_pct"].mean()
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1,c2,c3,c4 = st.columns(4)
     c1.metric("Worst Quarter",      worst_q["quarter"])
     c2.metric("Max Dept Gap",       f"{int(worst_q['gap']):,} units",
               f"{worst_q['gap_pct']:.1f}% misalignment")
     c3.metric("Avg Cross-Dept Gap", f"{avg_gap:.1f}%", "Target: <5%")
-    c4.metric("Revenue at Risk*",   f"${int(worst_q['gap'] * 45):,}", "*@$45 ASP")
+    c4.metric("Revenue at Risk*",   f"${int(worst_q['gap']*45):,}", "*@$45 ASP")
 
     if avg_gap > 10:
         alert("critical",
-              f"<b>Critical misalignment:</b> {avg_gap:.1f}% avg gap — revenue leakage and overproduction risk are HIGH")
+              f"<b>Critical misalignment:</b> {avg_gap:.1f}% avg gap - "
+              f"revenue leakage and overproduction risk are HIGH")
     elif avg_gap > 5:
         alert("warning",
-              f"<b>Moderate misalignment:</b> {avg_gap:.1f}% avg gap — S&OP sync needed before next planning cycle")
+              f"<b>Moderate misalignment:</b> {avg_gap:.1f}% avg gap - "
+              f"S&OP sync needed before next planning cycle")
 
     sh("📊", "Department Signals by Quarter")
     dept_colors = {"Sales":"#6366f1","Demand Plan":"#10b981",
                    "Production Capacity":"#f59e0b","Procurement":"#ec4899"}
     fig = go.Figure()
-    for _, row in df.iterrows():
+    for _,row in df.iterrows():
         dept = row["department"]
         fig.add_trace(go.Bar(
             name=dept, x=[ql[q] for q in quarters],
             y=[row[q] for q in quarters],
-            marker_color=dept_colors.get(dept, "#64748b"),
+            marker_color=dept_colors.get(dept,"#64748b"),
         ))
     pc(dark(fig, height=360, barmode="group"))
 
@@ -920,6 +894,7 @@ def module_sop_ui(api_key):
                 color=gap_df["gap_pct"],
                 colorscale=[[0,"#064e3b"],[.4,"#f59e0b"],[.7,"#ef4444"],[1,"#dc2626"]],
                 showscale=True,
+                # fix: titlefont -> title=dict(font=...) for Plotly 6
                 colorbar=dict(
                     title=dict(text="Gap %", font=dict(color="#94a3b8")),
                     tickfont=dict(color="#94a3b8"),
@@ -930,13 +905,13 @@ def module_sop_ui(api_key):
             textposition="outside", textfont=dict(color="#e2e8f0"),
         ))
         pc(dark(fig2, height=300, legend=False, title="Unit Gap by Quarter",
-                margin=dict(t=40, b=16, l=8, r=8)))
+                margin=dict(t=40,b=16,l=8,r=8)))
     with col_b:
         heat_rows = []
-        for _, row in df.iterrows():
+        for _,row in df.iterrows():
             hr = {"Department": row["department"]}
             for q in quarters:
-                hr[ql[q]] = round((df[q].max() - row[q]) / df[q].max() * 100, 1)
+                hr[ql[q]] = round((df[q].max()-row[q])/df[q].max()*100, 1)
             heat_rows.append(hr)
         heat_df = pd.DataFrame(heat_rows).set_index("Department")
         fig3 = go.Figure(go.Heatmap(
@@ -946,24 +921,23 @@ def module_sop_ui(api_key):
             zmin=0, zmax=20,
         ))
         pc(dark(fig3, height=300, legend=False, title="Shortfall % vs Max Signal",
-                margin=dict(t=40, b=16, l=100, r=16)))
+                margin=dict(t=40,b=16,l=100,r=16)))
 
     sh("🤖", "AI S&OP Misalignment Analysis")
     if st.button("Run AI S&OP Analysis", key="btn_sop"):
-        with st.spinner("Diagnosing cross-department gaps with Groq..."):
+        with st.spinner("Analyzing with Groq..."):
             render_ai_box(groq_insight(api_key,
                 "You are a senior S&OP and supply chain planning expert. Be precise with numbers. Bold key findings with **text**.",
-                f"""S&OP department signals (units): {df.to_dict('records')}
-Gap analysis: {gap_df.to_dict('records')}
-ASP = $45/unit | Average gap: {avg_gap:.1f}%
-
-Provide:
-1. Most dangerous quarter with specific dept shortfall/surplus
-2. Revenue at risk from demand > production capacity (use ASP $45)
-3. Cost from procurement over-ordering vs demand signal
-4. Most reliable department signal and why
-5. Top 3 S&OP meeting action items for next cycle
-6. One process change to get misalignment below 5%"""
+                f"S&OP department signals (units): {df.to_dict('records')}\n"
+                f"Gap analysis: {gap_df.to_dict('records')}\n"
+                f"ASP = $45/unit | Average gap: {avg_gap:.1f}%\n\n"
+                f"Provide:\n"
+                f"1. Most dangerous quarter with specific dept shortfall/surplus\n"
+                f"2. Revenue at risk from demand > production capacity (use ASP $45)\n"
+                f"3. Cost from procurement over-ordering vs demand signal\n"
+                f"4. Most reliable department signal and why\n"
+                f"5. Top 3 S&OP meeting action items for next cycle\n"
+                f"6. One process change to get misalignment below 5%"
             ))
 
 # ══════════════════════════════════════════════════════════════
@@ -976,13 +950,13 @@ def module_kpi_ui(api_key):
     df["performance_pct"] = (df["current_value"] / df["target_value"] * 100).round(1)
     df["gap"]    = (df["target_value"] - df["current_value"]).round(2)
     df["status"] = df["performance_pct"].apply(
-        lambda p: "On Target" if p >= 100 else ("Near Target" if p >= 85 else "Off Target"))
+        lambda p: "On Target" if p>=100 else ("Near Target" if p>=85 else "Off Target"))
 
-    with st.expander(f"📋 Raw Dataset {'(Demo)' if is_demo('kpi') else '(Uploaded)'}", False):
+    with st.expander(f"Raw Dataset {'(Demo)' if is_demo('kpi') else '(Uploaded)'}", False):
         st.dataframe(df, width="stretch")
 
     cols = st.columns(len(df))
-    for i, (_, row) in enumerate(df.iterrows()):
+    for i,(_,row) in enumerate(df.iterrows()):
         need_low   = row["kpi_name"] == "Avg Lead Time"
         good_trend = (row["trend"] < 0) if need_low else (row["trend"] > 0)
         sym = "+" if row["trend"] > 0 else "-"
@@ -995,43 +969,40 @@ def module_kpi_ui(api_key):
 
     sh("🎯", "Performance Gauges")
     gcols = st.columns(3)
-    for i, (_, row) in enumerate(df.iterrows()):
+    for i,(_,row) in enumerate(df.iterrows()):
         pct = row["performance_pct"]
-        clr = "#10b981" if pct >= 100 else ("#f59e0b" if pct >= 85 else "#ef4444")
+        clr = "#10b981" if pct>=100 else ("#f59e0b" if pct>=85 else "#ef4444")
         fig = go.Figure(go.Indicator(
             mode="gauge+number+delta",
             value=row["current_value"],
-            title={"text": row["kpi_name"], "font": {"size": 12, "color": "#94a3b8"}},
+            title={"text": row["kpi_name"], "font": {"size":12,"color":"#94a3b8"}},
             delta={"reference": row["target_value"], "suffix": row["unit"],
-                   "increasing": {"color": "#10b981"}, "decreasing": {"color": "#ef4444"}},
-            number={"suffix": row["unit"], "font": {"color": "#e2e8f0", "size": 24}},
+                   "increasing":{"color":"#10b981"}, "decreasing":{"color":"#ef4444"}},
+            number={"suffix": row["unit"], "font":{"color":"#e2e8f0","size":24}},
             gauge={
-                "axis": {                          # gridcolor removed — invalid in Plotly 6
-                    "range": [0, row["target_value"] * 1.25],
-                    "tickfont": {"color": "#64748b", "size": 9},
-                },
+                # fix: gridcolor removed from axis - invalid in Plotly 6
+                "axis": {"range":[0, row["target_value"]*1.25],
+                         "tickfont":{"color":"#64748b","size":9}},
                 "bar":  {"color": clr, "thickness": .28},
                 "bgcolor": "#0a1628",
                 "bordercolor": "#1e3a5f",
-                "threshold": {"line": {"color": "#fff", "width": 3},
-                              "thickness": .75, "value": row["target_value"]},
+                "threshold": {"line":{"color":"#fff","width":3},
+                              "thickness":.75, "value":row["target_value"]},
                 "steps": [
-                    {"range": [0, row["target_value"] * .7],  "color": "#1a0a0a"},
-                    {"range": [row["target_value"] * .7,  row["target_value"] * .9], "color": "#1a140a"},
-                    {"range": [row["target_value"] * .9,  row["target_value"] * 1.25], "color": "#061a10"},
+                    {"range":[0, row["target_value"]*.7],  "color":"#1a0a0a"},
+                    {"range":[row["target_value"]*.7,  row["target_value"]*.9],  "color":"#1a140a"},
+                    {"range":[row["target_value"]*.9,  row["target_value"]*1.25],"color":"#061a10"},
                 ],
             },
         ))
-        fig.update_layout(
-            paper_bgcolor="#0a1628", height=210,
-            margin=dict(t=48, b=8, l=16, r=16),
-        )
-        gcols[i % 3].plotly_chart(fig, width="stretch")
+        fig.update_layout(paper_bgcolor="#0a1628", height=210,
+                          margin=dict(t=48,b=8,l=16,r=16))
+        gcols[i%3].plotly_chart(fig, width="stretch")
 
-    sh("📊", "KPI vs Target — Gap Analysis")
+    sh("📊", "KPI vs Target - Gap Analysis")
     col_a, col_b = st.columns(2)
     with col_a:
-        bar_clrs = ["#10b981" if p >= 100 else "#f59e0b" if p >= 85 else "#ef4444"
+        bar_clrs = ["#10b981" if p>=100 else "#f59e0b" if p>=85 else "#ef4444"
                     for p in df["performance_pct"]]
         fig2 = go.Figure(go.Bar(
             x=df["performance_pct"], y=df["kpi_name"], orientation="h",
@@ -1042,7 +1013,7 @@ def module_kpi_ui(api_key):
         fig2.add_vline(x=100, line_dash="dot",  line_color="#334155")
         fig2.add_vline(x=85,  line_dash="dash", line_color="#f59e0b", line_width=1)
         pc(dark(fig2, height=300, legend=False, title="% of Target Achieved",
-                margin=dict(t=40, b=16, l=8, r=60)))
+                margin=dict(t=40,b=16,l=8,r=60)))
     with col_b:
         fig3 = go.Figure(go.Heatmap(
             z=[df["performance_pct"].tolist()],
@@ -1051,20 +1022,20 @@ def module_kpi_ui(api_key):
             zmin=50, zmax=110,
             texttemplate="%{z:.1f}%", textfont=dict(size=12, color="#fff"),
         ))
-        pc(dark(fig3, height=300, legend=False, title="Heatmap — % of Target",
-                margin=dict(t=40, b=16, l=16, r=16)))
+        pc(dark(fig3, height=300, legend=False, title="Heatmap - % of Target",
+                margin=dict(t=40,b=16,l=16,r=16)))
 
     sh("📈", "Trend Direction per KPI")
     fig4 = go.Figure()
-    for i, (_, row) in enumerate(df.iterrows()):
+    for i,(_,row) in enumerate(df.iterrows()):
         need_low = row["kpi_name"] == "Avg Lead Time"
         good = (row["trend"] <= 0) if need_low else (row["trend"] >= 0)
         clr  = "#10b981" if good else "#ef4444"
         fig4.add_trace(go.Scatter(
             x=["3mo ago","2mo ago","1mo ago","Now"],
-            y=[row["current_value"] - row["trend"] * 3,
-               row["current_value"] - row["trend"] * 2,
-               row["current_value"] - row["trend"],
+            y=[row["current_value"]-row["trend"]*3,
+               row["current_value"]-row["trend"]*2,
+               row["current_value"]-row["trend"],
                row["current_value"]],
             name=row["kpi_name"], mode="lines+markers",
             line=dict(color=clr, width=2), marker=dict(size=6, color=clr),
@@ -1073,23 +1044,22 @@ def module_kpi_ui(api_key):
 
     sh("🤖", "AI Executive KPI Brief")
     if st.button("Generate AI KPI Brief", key="btn_kpi"):
-        with st.spinner("Generating executive brief with Groq..."):
+        with st.spinner("Analyzing with Groq..."):
             rows = df[["kpi_name","current_value","target_value","unit","trend",
                         "performance_pct","gap","status"]].to_dict("records")
-            off  = df[df["performance_pct"] < 100]["kpi_name"].tolist()
+            off  = df[df["performance_pct"]<100]["kpi_name"].tolist()
             render_ai_box(groq_insight(api_key,
                 "You are a supply chain VP preparing an executive briefing. Be direct, specific, data-driven. Bold key findings with **text**.",
-                f"""KPI performance: {rows}
-Off-target ({len(off)} of {len(df)}): {off}
-Monthly revenue base: $10M
-
-Provide:
-1. Top 3 KPIs bleeding most value with $ impact per unit of gap
-2. Causal chain — which are root causes vs symptoms
-3. Root cause hypothesis for the worst-performing KPI
-4. 30 / 60 / 90-day action plan (one action per period)
-5. One untracked metric that would explain these gaps
-6. What leadership needs to see to approve resources for fixes"""
+                f"KPI performance: {rows}\n"
+                f"Off-target ({len(off)} of {len(df)}): {off}\n"
+                f"Monthly revenue base: $10M\n\n"
+                f"Provide:\n"
+                f"1. Top 3 KPIs bleeding most value with $ impact per unit of gap\n"
+                f"2. Causal chain - which are root causes vs symptoms\n"
+                f"3. Root cause hypothesis for the worst-performing KPI\n"
+                f"4. 30 / 60 / 90-day action plan (one action per period)\n"
+                f"5. One untracked metric that would explain these gaps\n"
+                f"6. What leadership needs to see to approve resources for fixes"
             ))
 
 # ══════════════════════════════════════════════════════════════
@@ -1104,9 +1074,9 @@ def main():
     </div>""", unsafe_allow_html=True)
     st.sidebar.markdown("---")
 
-    st.sidebar.markdown("**🔑 Groq API Key**")
+    st.sidebar.markdown("**Groq API Key**")
     api_key = st.sidebar.text_input(
-        "Groq API Key",                    # non-empty label required by Streamlit 1.55+
+        "Groq API Key",
         type="password",
         placeholder="gsk_...",
         label_visibility="collapsed",
@@ -1115,19 +1085,17 @@ def main():
     if api_key:
         st.sidebar.markdown(
             '<div style="color:#86efac;font-size:12px">API key active</div>',
-            unsafe_allow_html=True,
-        )
+            unsafe_allow_html=True)
     else:
         st.sidebar.markdown(
             '<div style="color:#fcd34d;font-size:12px">Add key to enable AI insights</div>',
-            unsafe_allow_html=True,
-        )
+            unsafe_allow_html=True)
     st.sidebar.markdown("---")
 
-    st.sidebar.markdown("**🧭 Module**")
+    st.sidebar.markdown("**Module**")
     labels = {f"{MODULE_META[k]['icon']}  {MODULE_META[k]['title']}": k for k in MODULE_META}
     sel = st.sidebar.radio(
-        "Select Module",                   # non-empty label required by Streamlit 1.55+
+        "Select Module",
         list(labels.keys()),
         label_visibility="collapsed",
     )
@@ -1138,7 +1106,7 @@ def main():
     st.sidebar.markdown("""
     <div style="font-size:10px;color:#334155;line-height:1.8">
         Model: llama-3.3-70b-versatile<br>
-        Provider: Groq · Ultra-low latency inference<br>
+        Provider: Groq - Ultra-low latency<br>
         Built for Supply Chain Analysts<br>
         Solving 5 core resource-drain problems
     </div>""", unsafe_allow_html=True)
