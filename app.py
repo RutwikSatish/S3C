@@ -1,10 +1,10 @@
 # ============================================================
-#  SUPPLY CHAIN COMMAND CENTER  |  app.py  |  FINAL v3
-#  Fixes vs v2:
-#   - Sidebar toggle always visible (bright blue floating button)
-#   - AI encoding: every f-string data value goes through _safe_str()
-#   - df.get() replaced with proper column access (no Series repr leak)
-#   - Dollar-formatted strings kept as plain ASCII
+#  SUPPLY CHAIN COMMAND CENTER  |  app.py  |  FINAL v4
+#  Changes vs v3:
+#   - Groq API key loaded from st.secrets["GROQ_API_KEY"]
+#     instead of a sidebar text input
+#   - Sidebar API key widget removed; replaced with status badge
+#   - groq_insight() signature unchanged -- still accepts api_key str
 # ============================================================
 
 import streamlit as st
@@ -32,19 +32,28 @@ _CHAR_MAP = {
 }
 
 def _clean(text: str) -> str:
-    # Step 1: replace known problem characters
     for ch, rep in _CHAR_MAP.items():
         text = text.replace(ch, rep)
-    # Step 2: encode to latin-1 dropping anything that won't fit,
-    # then decode back — same trick used in PDF export libs, silently
-    # drops all remaining non-latin-1 chars instead of crashing
     return text.encode("latin-1", errors="ignore").decode("latin-1")
 
 def _safe_str(obj) -> str:
-    """Serialize ANY object to a latin-1 safe string.
-    Always use this instead of embedding raw Python objects in f-strings."""
     raw = json.dumps(obj, ensure_ascii=True, default=str)
     return _clean(raw)
+
+# ══════════════════════════════════════════════════════════════
+#  SECRETS HELPER
+#  Reads GROQ_API_KEY from .streamlit/secrets.toml (local) or
+#  the Streamlit Cloud Secrets manager.
+#
+#  secrets.toml example:
+#    GROQ_API_KEY = "gsk_..."
+# ══════════════════════════════════════════════════════════════
+def _load_api_key() -> str:
+    """Return the Groq API key from st.secrets, or '' if not configured."""
+    try:
+        return st.secrets["GROQ_API_KEY"]
+    except (KeyError, FileNotFoundError):
+        return ""
 
 # ══════════════════════════════════════════════════════════════
 #  GROQ — urllib only, zero third-party HTTP deps
@@ -53,11 +62,15 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 
 def groq_insight(api_key: str, system: str, user: str) -> str:
     if not api_key:
-        return ("Enter your Groq API key in the sidebar.\n"
-                "Free key at console.groq.com -- 30 seconds to set up.")
+        return (
+            "Groq API key not found.\n\n"
+            "Add it to your Streamlit secrets:\n"
+            "  1. Create .streamlit/secrets.toml\n"
+            "  2. Add: GROQ_API_KEY = \"gsk_...\"\n"
+            "  3. Restart the app.\n\n"
+            "On Streamlit Cloud: Settings -> Secrets -> paste the same line."
+        )
     try:
-        # Serialize payload to bytes — ensure_ascii=True means only
-        # printable ASCII chars exist in the JSON string before encoding
         body = json.dumps({
             "model": GROQ_MODEL,
             "messages": [
@@ -68,10 +81,7 @@ def groq_insight(api_key: str, system: str, user: str) -> str:
             "temperature": 0.3,
         }, ensure_ascii=True).encode("ascii")
 
-        # Use http.client directly — gives full byte-level control
-        # over headers and body, bypassing urllib's internal latin-1
-        # header encoding that causes the crash on Python 3.14
-        ctx = ssl.create_default_context()
+        ctx  = ssl.create_default_context()
         conn = http.client.HTTPSConnection("api.groq.com", context=ctx)
         conn.request(
             "POST",
@@ -105,7 +115,6 @@ st.markdown("""
 html,body,[data-testid="stAppViewContainer"]{background:#050d1a !important;color:#e2e8f0 !important}
 [data-testid="stHeader"]{background:#0a1628 !important;border-bottom:1px solid #1e3a5f !important}
 
-/* Show all native Streamlit toolbar controls */
 [data-testid="stToolbar"]{display:flex !important;visibility:visible !important}
 [data-testid="stToolbar"] button,[data-testid="stToolbar"] svg{color:#e2e8f0 !important;fill:#e2e8f0 !important}
 #MainMenu{visibility:visible !important;display:block !important}
@@ -119,7 +128,6 @@ footer{visibility:hidden}
     border-right:1px solid #2563eb !important;
     min-width:260px !important;
 }
-/* All sidebar text bright white */
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] span,
 [data-testid="stSidebar"] label,
@@ -129,8 +137,6 @@ footer{visibility:hidden}
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
     color:#e2e8f0 !important;
 }
-
-/* Sidebar collapse button — bright blue circle, never invisible */
 [data-testid="stSidebarCollapseButton"] button,
 [data-testid="stSidebarCollapsedControl"] button,
 [data-testid="collapsedControl"] {
@@ -148,15 +154,6 @@ footer{visibility:hidden}
     color:#ffffff !important;
     opacity:1 !important;
 }
-
-/* Sidebar input */
-[data-testid="stSidebar"] input{
-    background:#0f2744 !important;border:1px solid #3b82f6 !important;
-    color:#ffffff !important;border-radius:8px !important;
-}
-[data-testid="stSidebar"] input::placeholder{color:#64748b !important}
-
-/* Sidebar radio */
 [data-testid="stSidebar"] .stRadio label{
     background:#0f2744 !important;border:1px solid #3b82f6 !important;
     color:#93c5fd !important;border-radius:8px !important;
@@ -167,8 +164,6 @@ footer{visibility:hidden}
     background:linear-gradient(135deg,#1d4ed8,#2563eb) !important;
     border-color:#60a5fa !important;color:#fff !important;
 }
-
-/* Sidebar buttons */
 [data-testid="stSidebar"] [data-testid="stDownloadButton"] button,
 [data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover{
     background:linear-gradient(135deg,#1d4ed8,#2563eb) !important;
@@ -176,9 +171,22 @@ footer{visibility:hidden}
     font-weight:700 !important;border-radius:8px !important;
     width:100% !important;box-shadow:0 2px 12px rgba(37,99,235,.5) !important;
 }
-
 [data-testid="stSidebar"] hr{border-color:#1e3a5f !important}
 [data-testid="stSidebar"] .stCaption{color:#64a0d4 !important}
+
+/* ── API status badge ── */
+.api-badge-ok{
+    display:flex;align-items:center;gap:8px;
+    background:#052e16;border:1px solid #16a34a;border-radius:8px;
+    padding:8px 12px;margin:4px 0 0;
+}
+.api-badge-ok span{color:#86efac;font-size:12px;font-weight:600}
+.api-badge-err{
+    display:flex;align-items:center;gap:8px;
+    background:#1c1917;border:1px solid #b45309;border-radius:8px;
+    padding:8px 12px;margin:4px 0 0;
+}
+.api-badge-err span{color:#fcd34d;font-size:11px;font-weight:500;line-height:1.5}
 
 /* ── Metrics ── */
 [data-testid="metric-container"]{
@@ -262,7 +270,7 @@ _LEG = dict(bgcolor="rgba(10,22,40,.8)",bordercolor="#1e3a5f",borderwidth=1,
 
 def dark(fig, h=380, leg=True, **kw):
     lay = {**_DB,"height":h,**kw}
-    if leg is True:          lay["legend"] = _LEG
+    if leg is True:            lay["legend"] = _LEG
     elif isinstance(leg,dict): lay["legend"] = {**_LEG,**leg}
     fig.update_layout(**lay)
     return fig
@@ -414,7 +422,6 @@ def mod_forecast(api_key):
     mape =np.mean([abs(a-e)/a*100 for a,e in zip(act[-3:],ema[-3:])]) if n>=3 else 0
     acc  =round(max(0,100-mape),1)
     vol  =round(np.std(act)/np.mean(act)*100,1)
-    # Fix: use column access not df.get() to avoid Series repr with dtype info
     promo_flags=df["promo_flag"].tolist() if "promo_flag" in df.columns else [0]*n
     promo=[months[i] for i,v in enumerate(promo_flags) if v==1 and i<n]
 
@@ -451,7 +458,6 @@ def mod_forecast(api_key):
     sh("🤖","AI Demand Analysis")
     if st.button("Run AI Forecast Analysis",key="btn_f"):
         with st.spinner("Analyzing with Groq..."):
-            # All data via _safe_str() -- no raw Python objects in f-strings
             ai_box(groq_insight(api_key,
                 "You are a senior supply chain demand planning analyst. Be specific with numbers. Use **bold** for key findings.",
                 "Historical demand: " + _safe_str(dict(zip(months[:n], [float(v) for v in act]))) + "\n"
@@ -838,6 +844,9 @@ def mod_kpi(api_key):
 #  MAIN
 # ══════════════════════════════════════════════════════════════
 def main():
+    # ── Load API key from secrets once -- never from user input ─
+    api_key = _load_api_key()
+
     st.sidebar.markdown("""
     <div style="text-align:center;padding:16px 0 8px">
         <div style="font-size:36px">⛓</div>
@@ -852,14 +861,18 @@ def main():
     </div>""", unsafe_allow_html=True)
     st.sidebar.markdown("---")
 
-    st.sidebar.markdown("**🔑 Groq API Key**")
-    api_key=st.sidebar.text_input("Groq API Key",type="password",
-                                   placeholder="gsk_...",label_visibility="collapsed",
-                                   help="Free at console.groq.com")
+    # ── Read-only API status badge (no text input shown) ────────
     if api_key:
-        st.sidebar.markdown('<p style="color:#86efac;font-size:12px;margin:0">✅ Key active</p>',unsafe_allow_html=True)
+        st.sidebar.markdown(
+            '<div class="api-badge-ok">'
+            '<span>✅&nbsp; Groq AI ready</span>'
+            '</div>', unsafe_allow_html=True)
     else:
-        st.sidebar.markdown('<p style="color:#fcd34d;font-size:12px;margin:0">⚠️ Add key for AI insights</p>',unsafe_allow_html=True)
+        st.sidebar.markdown(
+            '<div class="api-badge-err">'
+            '<span>⚠️ GROQ_API_KEY missing.<br>'
+            'Add to <code>.streamlit/secrets.toml</code></span>'
+            '</div>', unsafe_allow_html=True)
     st.sidebar.markdown("---")
 
     st.sidebar.markdown("**🧭 Module**")
